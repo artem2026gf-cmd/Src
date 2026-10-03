@@ -1,0 +1,1286 @@
+-- ============================================
+-- ABYSALL VISUALS | PART 1/8
+-- Loader: Obsidian UI
+-- ============================================
+
+local OBSIDIAN_URL = "https://raw.githubusercontent.com/deividcomson/obsidian-lib/main/source.lua"
+
+local function fetch(url)
+    if game.HttpGet then
+        local ok, res = pcall(function() return game:HttpGet(url, true) end)
+        if ok and res and #res > 100 and not res:find("<!DOCTYPE") then return res end
+    end
+    if request then
+        local ok, res = pcall(function() return request({Url=url, Method="GET"}) end)
+        if ok and res and res.Body and #res.Body > 100 then return res.Body end
+    end
+    return nil
+end
+
+local function showError(msg)
+    warn("[Abysall Visuals] " .. tostring(msg))
+end
+
+local ok, Obsidian = pcall(function()
+    local src = fetch(OBSIDIAN_URL)
+    if not src then error("Failed to download Obsidian") end
+    local fn, err = loadstring(src)
+    if not fn then error("Compile: " .. tostring(err)) end
+    return fn()
+end)
+
+if not ok or type(Obsidian) ~= "table" then
+    showError("Obsidian load failed: " .. tostring(Obsidian))
+    return
+end
+
+getgenv().Obsidian = Obsidian
+print("[Abysall Visuals] Part 1/8 — Obsidian loaded")
+-- ============================================
+-- ABYSALL VISUALS | PART 2/8
+-- Окно + все вкладки + хранилища
+-- ============================================
+
+local Obsidian = getgenv().Obsidian
+if not Obsidian then
+    warn("[Abysall Visuals] Obsidian не загружен (Part 1)")
+    return
+end
+
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+
+local Window = Obsidian:CreateWindow({
+    Title = "Abysall Hub | Visuals",
+    SubTitle = "Standalone",
+    Footer = "Visuals Only",
+    Icon = "rbxassetid://10734952036",
+    NotifySide = "Right",
+    ShowCustomCursor = false,
+    AutoShow = true,
+    Center = true,
+    Size = UDim2.fromOffset(720, 560),
+    TabPadding = 3,
+    MenuFadeTime = 0.15,
+    CornerRadius = 8,
+})
+
+getgenv().AV_Window = Window
+
+local GeneralTab   = Window:AddTab("General", "house")
+local ExploitsTab  = Window:AddTab("Exploits", "shield")
+local VisualsTab   = Window:AddTab("Visuals", "eye")
+local FloorsTab    = Window:AddTab("Floors", "earth")
+local ArchivesTab  = Window:AddTab("Archives", "rbxassetid://104508835882225")
+local StairwellTab = Window:AddTab("Stairwell", "rbxassetid://80017304328364")
+
+getgenv().AV_Tabs = {
+    General = GeneralTab, Exploits = ExploitsTab, Visuals = VisualsTab,
+    Floors = FloorsTab, Archives = ArchivesTab, Stairwell = StairwellTab,
+}
+
+local T, S, D, C, B = {}, {}, {}, {}, {}
+getgenv().AV_Toggles = T
+getgenv().AV_Sliders = S
+getgenv().AV_Dropdowns = D
+getgenv().AV_Colors = C
+getgenv().AV_Buttons = B
+
+local function setT(k, v) T[k] = v end
+local function setS(k, v) S[k] = v end
+local function setD(k, v) D[k] = v end
+local function setC(k, v) C[k] = v end
+
+local Globals = {
+    OldFog = game:GetService("Lighting").FogEnd,
+    FogInstances = {}, ThirdPersonParts = {}, SurgeFrame = nil,
+    IsEyes = false, IsLookman = false, OriginalC1 = nil, Sliding = false,
+}
+local Objects = {
+    Entities = {}, Objectives = {}, Doors = {}, HidingSpots = {},
+    Items = {}, Chests = {}, Currency = {}, Ladders = {},
+    Prompts = {}, Obstructions = {}, SeekBridges = {},
+    SeekHighlights = {}, EyestalkHighlights = {}, JumpscareModules = {},
+}
+local Connections = {}
+local function keep(c) table.insert(Connections, c) return c end
+
+getgenv().AV_Globals = Globals
+getgenv().AV_Objects = Objects
+getgenv().AV_Connections = Connections
+getgenv().AV_keep = keep
+
+local AV = getgenv()
+AV.Character = nil; AV.Humanoid = nil; AV.RootPart = nil
+AV.Camera = workspace.CurrentCamera
+AV.Collision = nil; AV.CollisionPart = nil
+AV.CollisionClone = nil; AV.CollisionPartClone = nil
+AV.MainUI = nil; AV.Main_Game = nil
+
+print("[Abysall Visuals] Part 2/8 — Window + Tabs created")
+-- ============================================
+-- ABYSALL VISUALS | PART 3/8
+-- Visuals → Camera tab
+-- ============================================
+
+local VisualsTab = getgenv().AV_Tabs and getgenv().AV_Tabs.Visuals
+if not VisualsTab then
+    warn("[Abysall Visuals] Visuals tab не создан (Part 2)")
+    return
+end
+
+local T = getgenv().AV_Toggles
+local S = getgenv().AV_Sliders
+local D = getgenv().AV_Dropdowns
+local C = getgenv().AV_Colors
+
+local Lighting = game:GetService("Lighting")
+local TS = game:GetService("TweenService")
+local LP = game:GetService("Players").LocalPlayer
+
+-- ===== Camera / Effects Tabbox =====
+local CameraEffects = VisualsTab:AddLeftTabbox("Camera / Effects")
+local CamT = CameraEffects:AddTab("Camera")
+local EffT = CameraEffects:AddTab("Effects")
+
+getgenv().AV_CamTab = CamT
+getgenv().AV_EffTab = EffT
+
+-- ============================================
+-- CAMERA: Ambient
+-- ============================================
+CamT:AddToggle("AmbientToggle", {
+    Text = "Ambient",
+    Default = false,
+    Tooltip = "Changes the lighting color.",
+    Callback = function(v) T.AmbientToggle = v end,
+})
+CamT:AddColorPicker("AmbientColor", {
+    Text = "Ambient",
+    Default = Color3.fromRGB(255, 255, 255),
+    Transparency = 0,
+    Callback = function(c) C.AmbientColor = c end,
+})
+
+-- ============================================
+-- CAMERA: Field of View
+-- ============================================
+CamT:AddSlider("FieldOfView", {
+    Text = "Field of View",
+    Min = 1, Max = 120, Default = 70, Rounding = 0,
+    Callback = function(v) S.FieldOfView = v end,
+})
+CamT:AddToggle("FOVToggle", {
+    Text = "Custom FOV",
+    Default = false,
+    Tooltip = "Only applies the Field of View slider when enabled.",
+    Callback = function(v) T.FOVToggle = v end,
+})
+CamT:AddKeyPicker("FovToggle", {
+    Text = "Custom Fov",
+    Default = "O",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Callback = function(v) T.FOVToggle = v end,
+})
+CamT:AddDivider()
+
+-- ============================================
+-- CAMERA: Remove Shake / Bobbing / Cutscenes / Fog
+-- ============================================
+CamT:AddToggle("RemoveCameraShake", {
+    Text = "Remove Camera Shake",
+    Default = false,
+    Tooltip = "Prevents the camera from shaking.",
+    Callback = function(v) T.RemoveCameraShake = v end,
+})
+CamT:AddToggle("RemoveCameraBobbing", {
+    Text = "Remove Camera Bobbing",
+    Default = false,
+    Tooltip = "Prevents the camera from bobbing when moving.",
+    Callback = function(v) T.RemoveCameraBobbing = v end,
+})
+CamT:AddToggle("RemoveCutscenes", {
+    Text = "Remove Cutscenes",
+    Default = false,
+    Tooltip = "Removes all non-necessary cutscenes.",
+    Callback = function(v) T.RemoveCutscenes = v end,
+})
+CamT:AddToggle("RemoveCameraFog", {
+    Text = "Remove Fog",
+    Default = false,
+    Tooltip = "Removes all fog effects from the camera.",
+    Callback = function(v) T.RemoveCameraFog = v end,
+})
+CamT:AddDivider()
+
+-- ============================================
+-- CAMERA: Third Person
+-- ============================================
+CamT:AddToggle("ThirdPersonToggle", {
+    Text = "Third Person",
+    Default = false,
+    Tooltip = "Zooms out your camera.",
+    Callback = function(v) T.ThirdPersonToggle = v end,
+})
+CamT:AddKeyPicker("ThirdPersonKeybind", {
+    Text = "Third Person",
+    Default = "T",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Callback = function(v) T.ThirdPersonToggle = v end,
+})
+CamT:AddSlider("ThirdPersonOffsetX", {
+    Text = "X Offset",
+    Min = -10, Max = 10, Default = 1.5, Rounding = 1, Compact = true,
+    Callback = function(v) S.ThirdPersonOffsetX = v end,
+})
+CamT:AddSlider("ThirdPersonOffsetY", {
+    Text = "Y Offset",
+    Min = -10, Max = 10, Default = 1, Rounding = 1, Compact = true,
+    Callback = function(v) S.ThirdPersonOffsetY = v end,
+})
+CamT:AddSlider("ThirdPersonOffsetZ", {
+    Text = "Z Offset",
+    Min = -10, Max = 10, Default = 5, Rounding = 1, Compact = true,
+    Callback = function(v) S.ThirdPersonOffsetZ = v end,
+})
+CamT:AddToggle("ThirdPersonWallCheck", {
+    Text = "Wall Check",
+    Default = false,
+    Tooltip = "Prevents third person from going through walls.",
+    Callback = function(v) T.ThirdPersonWallCheck = v end,
+})
+CamT:AddDivider()
+
+-- ============================================
+-- CAMERA: Viewmodel Offset
+-- ============================================
+CamT:AddToggle("ViewmodelOffsetToggle", {
+    Text = "Viewmodel Offset",
+    Default = false,
+    Tooltip = "Changes the offset of your viewmodel.",
+    Callback = function(v) T.ViewmodelOffsetToggle = v end,
+})
+CamT:AddSlider("ViewmodelOffsetX", {
+    Text = "X Offset",
+    Min = -10, Max = 10, Default = 0, Rounding = 1, Compact = true,
+    Callback = function(v) S.ViewmodelOffsetX = v end,
+})
+CamT:AddSlider("ViewmodelOffsetY", {
+    Text = "Y Offset",
+    Min = -10, Max = 10, Default = 0, Rounding = 1, Compact = true,
+    Callback = function(v) S.ViewmodelOffsetY = v end,
+})
+CamT:AddSlider("ViewmodelOffsetZ", {
+    Text = "Z Offset",
+    Min = -10, Max = 10, Default = 0, Rounding = 1, Compact = true,
+    Callback = function(v) S.ViewmodelOffsetZ = v end,
+})
+
+-- Дефолтные значения
+T.AmbientToggle = false
+T.FOVToggle = false
+T.RemoveCameraShake = false
+T.RemoveCameraBobbing = false
+T.RemoveCutscenes = false
+T.RemoveCameraFog = false
+T.ThirdPersonToggle = false
+T.ThirdPersonWallCheck = false
+T.ViewmodelOffsetToggle = false
+
+S.FieldOfView = 70
+S.ThirdPersonOffsetX = 1.5
+S.ThirdPersonOffsetY = 1
+S.ThirdPersonOffsetZ = 5
+S.ViewmodelOffsetX = 0
+S.ViewmodelOffsetY = 0
+S.ViewmodelOffsetZ = 0
+
+C.AmbientColor = Color3.fromRGB(255, 255, 255)
+
+print("[Abysall Visuals] Part 3/8 — Camera tab filled")
+-- ============================================
+-- ABYSALL VISUALS | PART 4/8
+-- Visuals → Effects tab
+-- ============================================
+
+local EffT = getgenv().AV_EffTab
+if not EffT then
+    warn("[Abysall Visuals] Effects tab не создан (Part 3)")
+    return
+end
+
+local T = getgenv().AV_Toggles
+local S = getgenv().AV_Sliders
+
+-- ============================================
+-- EFFECTS: Transparent Hiding Spots
+-- ============================================
+EffT:AddToggle("TransparentHidingSpotsToggle", {
+    Text = "Transparent Hiding Spots",
+    Default = false,
+    Tooltip = "Makes a hiding spot transparent when you enter it.",
+    Callback = function(v) T.TransparentHidingSpotsToggle = v end,
+})
+EffT:AddSlider("TransparentHidingSpotsSlider", {
+    Text = "Transparency",
+    Min = 0, Max = 1, Default = 0.5, Rounding = 2, Compact = true,
+    Callback = function(v) S.TransparentHidingSpotsSlider = v end,
+})
+EffT:AddDivider()
+
+-- ============================================
+-- EFFECTS: Jumpscares
+-- ============================================
+EffT:AddToggle("DisableGlitchJumpscare", {
+    Text = "Disable Glitch Jumpscare",
+    Default = false,
+    Tooltip = "Disables the jumpscare from 'Glitch'.",
+    Callback = function(v) T.DisableGlitchJumpscare = v end,
+})
+EffT:AddToggle("DisableTimothyJumpscare", {
+    Text = "Disable Timothy Jumpscare",
+    Default = false,
+    Tooltip = "Disables the jumpscare from 'Timothy'.",
+    Callback = function(v) T.DisableTimothyJumpscare = v end,
+})
+EffT:AddToggle("DisableVoidJumpscare", {
+    Text = "Disable Void Jumpscare",
+    Default = false,
+    Tooltip = "Disables the jumpscare from 'Void'.",
+    Callback = function(v) T.DisableVoidJumpscare = v end,
+})
+EffT:AddDivider()
+
+-- ============================================
+-- EFFECTS: Vignettes
+-- ============================================
+EffT:AddToggle("DisableHideVignette", {
+    Text = "Disable Hide Vignette",
+    Default = false,
+    Tooltip = "Disables the hiding screen effect.",
+    Callback = function(v) T.DisableHideVignette = v end,
+})
+EffT:AddToggle("DisableFiredampEffect", {
+    Text = "Disable Firedamp Effect",
+    Default = false,
+    Tooltip = "Disables the firedamp screen effect.",
+    Callback = function(v) T.DisableFiredampEffect = v end,
+})
+EffT:AddToggle("DisableEntityJumpscares", {
+    Text = "Disable Entity Jumpscares",
+    Default = false,
+    Tooltip = "Disables jumpscares from entities like Rush and Ambush.",
+    Callback = function(v) T.DisableEntityJumpscares = v end,
+})
+
+-- Дефолтные значения
+T.TransparentHidingSpotsToggle = false
+T.DisableGlitchJumpscare = false
+T.DisableTimothyJumpscare = false
+T.DisableVoidJumpscare = false
+T.DisableHideVignette = false
+T.DisableFiredampEffect = false
+T.DisableEntityJumpscares = false
+S.TransparentHidingSpotsSlider = 0.5
+
+print("[Abysall Visuals] Part 4/8 — Effects tab filled")
+-- ============================================
+-- ABYSALL VISUALS | PART 5/8
+-- Visuals → Entities / Settings Tabbox
+-- ============================================
+
+local VisualsTab = getgenv().AV_Tabs and getgenv().AV_Tabs.Visuals
+if not VisualsTab then
+    warn("[Abysall Visuals] Visuals tab не создан (Part 2)")
+    return
+end
+
+local T = getgenv().AV_Toggles
+local S = getgenv().AV_Sliders
+local D = getgenv().AV_Dropdowns
+
+-- ===== Entities / Settings Tabbox =====
+local EntitiesSettings = VisualsTab:AddRightTabbox("Entities / Settings")
+local EntT = EntitiesSettings:AddTab("Entities")
+local SetT = EntitiesSettings:AddTab("Settings")
+
+getgenv().AV_EntitiesTab = EntT
+getgenv().AV_SettingsTab = SetT
+
+-- ============================================
+-- ENTITIES: Entity List + Notify
+-- ============================================
+EntT:AddDropdown("EntityList", {
+    Text = "Entity List",
+    Values = {
+        "Rush","Bash","Scribbles","Teller","DronesStampede","Creak","Noise",
+        "Balls","Ambush","Eyes","Halt","Blitz","Lookman","Gloombat Swarm",
+        "A-60","A-120","Sally","Jeff the Killer","Groundskeeper","Monument",
+        "AR0xMBUSH","RNIUSHCG==",
+    },
+    Multi = true,
+    AllowNull = true,
+    Callback = function(v) D.EntityList = v end,
+})
+EntT:AddToggle("NotifyEntities", {
+    Text = "Notify Entities",
+    Default = false,
+    Tooltip = "Sends a notification when an entity spawns.",
+    Callback = function(v) T.NotifyEntities = v end,
+})
+EntT:AddDivider()
+
+-- ============================================
+-- ENTITIES: Item List + Notify
+-- ============================================
+EntT:AddDropdown("NotifyItemList", {
+    Text = "Item List",
+    Values = {
+        "Lamp","Gween Soda Pack","Flashlight","Lockpicks","Vitamins","Bandage",
+        "Crucifix","Glowstick","Skeleton Key","Bandage Pack","Shears","Lighter",
+        "Battery","Candle","Compass","Golden Gun","Iron Key","Lotus Petal",
+        "Multitool","Rift Jar","Aloe Vera","Donut","Lotus","Boxing Gloves",
+        "Starlight Vial","Starlight Bottle","Starlight Barrel","Gummy Flashlight",
+        "Straplight","Spotlight","Smoothie","Cheese","Bread","Alarm Clock",
+        "Moonlight Candle","Laser Pointer","Holy Hand Grenade","Moonlight Smoothie",
+        "Gween Soda","Glitch Fragment","Tablet","Bomb","Knockbomb","Nanner",
+        "Big Bomb","Hiding Box","Stop Sign","Tip Jar","Lantern","Paper Plane",
+    },
+    Multi = true,
+    AllowNull = true,
+    Callback = function(v) D.NotifyItemList = v end,
+})
+EntT:AddToggle("NotifyItemsToggle", {
+    Text = "Notify Items",
+    Default = false,
+    Tooltip = "Sends a notification when an item spawns.",
+    Callback = function(v) T.NotifyItemsToggle = v end,
+})
+EntT:AddToggle("NotifyItemsShowDistance", {
+    Text = "Show Distance",
+    Default = false,
+    Tooltip = "Shows how far away the item is in the notification.",
+    Callback = function(v) T.NotifyItemsShowDistance = v end,
+})
+EntT:AddDivider()
+
+-- ============================================
+-- ENTITIES: Library / Oxygen / Haste
+-- ============================================
+EntT:AddToggle("NotifyLibraryCode", {
+    Text = "Notify Library Code",
+    Default = false,
+    Tooltip = "Automatically solves the code for the library padlock.",
+    Callback = function(v) T.NotifyLibraryCode = v end,
+})
+EntT:AddToggle("NotifyOxygen", {
+    Text = "Notify Oxygen Level",
+    Default = false,
+    Tooltip = "Shows how much oxygen you have remaining.",
+    Callback = function(v) T.NotifyOxygen = v end,
+})
+EntT:AddToggle("NotifyHasteTime", {
+    Text = "Notify Haste Time",
+    Default = false,
+    Tooltip = "Shows how much time you have remaining before 'Haste' spawns.",
+    Callback = function(v) T.NotifyHasteTime = v end,
+})
+
+-- ============================================
+-- SETTINGS: Chat + Message
+-- ============================================
+SetT:AddToggle("EntityChatToggle", {
+    Text = "Notify Chat",
+    Default = false,
+    Tooltip = "Sends a chat message when an entity spawns.",
+    Callback = function(v) T.EntityChatToggle = v end,
+})
+SetT:AddInput("EntityChatMessage", {
+    Text = "Message",
+    Default = "spawned!",
+    Numeric = false,
+    Placeholder = "Message",
+    Callback = function(v) D.EntityChatMessage = v end,
+})
+SetT:AddDivider()
+
+-- ============================================
+-- SETTINGS: Notify style
+-- ============================================
+SetT:AddDropdown("NotifyStyle", {
+    Text = "Notify Style",
+    Values = { "Abysall", "Doors", "STX", "Library" },
+    Default = 1,
+    Callback = function(v) D.NotifyStyle = v end,
+})
+SetT:AddSlider("NotifySoundVolume", {
+    Text = "Sound Volume",
+    Min = 0, Max = 10, Default = 3, Rounding = 1,
+    Callback = function(v) S.NotifySoundVolume = v end,
+})
+SetT:AddToggle("NotifyPlaySound", {
+    Text = "Play Sound",
+    Default = true,
+    Tooltip = "Makes notifications play an alert sound.",
+    Callback = function(v) T.NotifyPlaySound = v end,
+})
+SetT:AddToggle("NotifyKeepNotifications", {
+    Text = "Keep Notifications",
+    Default = false,
+    Tooltip = "Certain notifications will stay on screen until they are no longer needed.",
+    Callback = function(v) T.NotifyKeepNotifications = v end,
+})
+SetT:AddButton({
+    Text = "Test Notification",
+    DoubleClick = false,
+    Tooltip = "Sends a test notification.",
+    Func = function()
+        local Win = getgenv().AV_Window
+        if Win and Win.Notify then
+            Win:Notify({ Title = "This is a test.", Content = "Notification works!" })
+        end
+    end,
+})
+
+-- Дефолтные значения
+T.NotifyEntities = false
+T.NotifyItemsToggle = false
+T.NotifyItemsShowDistance = false
+T.NotifyLibraryCode = false
+T.NotifyOxygen = false
+T.NotifyHasteTime = false
+T.EntityChatToggle = false
+T.NotifyPlaySound = true
+T.NotifyKeepNotifications = false
+S.NotifySoundVolume = 3
+D.EntityList = {}
+D.NotifyItemList = {}
+D.NotifyStyle = "Abysall"
+D.EntityChatMessage = "spawned!"
+
+print("[Abysall Visuals] Part 5/8 — Entities + Settings filled")
+-- ============================================
+-- ABYSALL VISUALS | PART 6/8
+-- Visuals → ESP Tabbox (все ESP-тумблеры)
+-- ============================================
+
+local VisualsTab = getgenv().AV_Tabs and getgenv().AV_Tabs.Visuals
+if not VisualsTab then
+    warn("[Abysall Visuals] Visuals tab не создан (Part 2)")
+    return
+end
+
+local T = getgenv().AV_Toggles
+local D = getgenv().AV_Dropdowns
+local C = getgenv().AV_Colors
+
+-- ===== ESP / Settings Tabbox =====
+local ESPSettingsBox = VisualsTab:AddRightTabbox("ESP/Settings")
+local ESPTab = ESPSettingsBox:AddTab("ESP")
+local ESPSettings = ESPSettingsBox:AddTab("Settings")
+
+getgenv().AV_ESPTab = ESPTab
+getgenv().AV_ESPSettings = ESPSettings
+
+-- ============================================
+-- ESP: Objectives
+-- ============================================
+ESPTab:AddToggle("ObjectiveESPToggle", {
+    Text = "Objectives",
+    Default = false,
+    Tooltip = "Highlights all objects required to progress.",
+    Callback = function(v) T.ObjectiveESPToggle = v end,
+})
+ESPTab:AddColorPicker("ObjectiveESPColor", {
+    Text = "Objectives",
+    Default = Color3.fromRGB(0, 255, 0),
+    Transparency = 0,
+    Callback = function(c) C.ObjectiveESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Doors
+-- ============================================
+ESPTab:AddToggle("DoorESPToggle", {
+    Text = "Doors",
+    Default = false,
+    Tooltip = "Highlights the next door.",
+    Callback = function(v) T.DoorESPToggle = v end,
+})
+ESPTab:AddColorPicker("DoorESPColor", {
+    Text = "Doors",
+    Default = Color3.fromRGB(0, 200, 255),
+    Transparency = 0,
+    Callback = function(c) C.DoorESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Hiding Spots
+-- ============================================
+ESPTab:AddToggle("HidingSpotESPToggle", {
+    Text = "Hiding Spots",
+    Default = false,
+    Tooltip = "Highlights places where you can hide from entities.",
+    Callback = function(v) T.HidingSpotESPToggle = v end,
+})
+ESPTab:AddColorPicker("HidingSpotESPColor", {
+    Text = "Hiding Spots",
+    Default = Color3.fromRGB(255, 170, 0),
+    Transparency = 0,
+    Callback = function(c) C.HidingSpotESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Players
+-- ============================================
+ESPTab:AddToggle("PlayerESPToggle", {
+    Text = "Players",
+    Default = false,
+    Tooltip = "Highlights other players.",
+    Callback = function(v) T.PlayerESPToggle = v end,
+})
+ESPTab:AddColorPicker("PlayerESPColor", {
+    Text = "Players",
+    Default = Color3.fromRGB(255, 255, 255),
+    Transparency = 0,
+    Callback = function(c) C.PlayerESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Chests
+-- ============================================
+ESPTab:AddToggle("ChestESPToggle", {
+    Text = "Chests",
+    Default = false,
+    Tooltip = "Highlights objects that can contain loot.",
+    Callback = function(v) T.ChestESPToggle = v end,
+})
+ESPTab:AddColorPicker("ChestESPColor", {
+    Text = "Chests",
+    Default = Color3.fromRGB(255, 255, 0),
+    Transparency = 0,
+    Callback = function(c) C.ChestESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Items
+-- ============================================
+ESPTab:AddToggle("ItemESPToggle", {
+    Text = "Items",
+    Default = false,
+    Tooltip = "Highlights all collectable items/consumables.",
+    Callback = function(v) T.ItemESPToggle = v end,
+})
+ESPTab:AddColorPicker("ItemESPColor", {
+    Text = "Items",
+    Default = Color3.fromRGB(170, 0, 255),
+    Transparency = 0,
+    Callback = function(c) C.ItemESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Currency
+-- ============================================
+ESPTab:AddToggle("CurrencyESPToggle", {
+    Text = "Currency",
+    Default = false,
+    Tooltip = "Highlights all currency that spawns.",
+    Callback = function(v) T.CurrencyESPToggle = v end,
+})
+ESPTab:AddColorPicker("CurrencyESPColor", {
+    Text = "Currency",
+    Default = Color3.fromRGB(255, 255, 0),
+    Transparency = 0,
+    Callback = function(c) C.CurrencyESPColor = c end,
+})
+
+-- ============================================
+-- ESP: Ladders
+-- ============================================
+ESPTab:AddToggle("LadderESPToggle", {
+    Text = "Ladders",
+    Default = false,
+    Tooltip = "Highlights ladders.",
+    Callback = function(v) T.LadderESPToggle = v end,
+})
+ESPTab:AddColorPicker("LadderESPColor", {
+    Text = "Ladders",
+    Default = Color3.fromRGB(255, 255, 255),
+    Transparency = 0,
+    Callback = function(c) C.LadderESPColor = c end,
+})
+
+ESPTab:AddDivider()
+
+-- ============================================
+-- ESP: Entities
+-- ============================================
+ESPTab:AddDropdown("EntityESPOptions", {
+    Text = "Entity List",
+    Values = {
+        "Rush","Bash","Scribbles","Teller","DronesStampede","Creak","Noise",
+        "Balls","Ambush","Eyes","Dupe","Figure","Blitz","Lookman","Snare",
+        "Giggle","Gloombat Eggs","Grumble","A-60","A-120","Sally",
+        "Jeff the Killer","Groundskeeper","Mandrake Hole","Monument",
+        "Bramble","AR0xMBUSH","RNIUSHCG==",
+    },
+    Multi = true,
+    AllowNull = true,
+    Callback = function(v) D.EntityESPOptions = v end,
+})
+ESPTab:AddToggle("EntityESPToggle", {
+    Text = "Entities",
+    Default = false,
+    Tooltip = "Highlights all entities that spawn.",
+    Callback = function(v) T.EntityESPToggle = v end,
+})
+ESPTab:AddColorPicker("EntityESPColor", {
+    Text = "Entities",
+    Default = Color3.fromRGB(255, 0, 0),
+    Transparency = 0,
+    Callback = function(c) C.EntityESPColor = c end,
+})
+
+-- ============================================
+-- ДЕФОЛТНЫЕ ЗНАЧЕНИЯ
+-- ============================================
+T.ObjectiveESPToggle = false
+T.DoorESPToggle = false
+T.HidingSpotESPToggle = false
+T.PlayerESPToggle = false
+T.ChestESPToggle = false
+T.ItemESPToggle = false
+T.CurrencyESPToggle = false
+T.LadderESPToggle = false
+T.EntityESPToggle = false
+
+C.ObjectiveESPColor = Color3.fromRGB(0, 255, 0)
+C.DoorESPColor = Color3.fromRGB(0, 200, 255)
+C.HidingSpotESPColor = Color3.fromRGB(255, 170, 0)
+C.PlayerESPColor = Color3.fromRGB(255, 255, 255)
+C.ChestESPColor = Color3.fromRGB(255, 255, 0)
+C.ItemESPColor = Color3.fromRGB(170, 0, 255)
+C.CurrencyESPColor = Color3.fromRGB(255, 255, 0)
+C.LadderESPColor = Color3.fromRGB(255, 255, 255)
+C.EntityESPColor = Color3.fromRGB(255, 0, 0)
+
+D.EntityESPOptions = {}
+
+print("[Abysall Visuals] Part 6/8 — ESP Toggles filled")
+-- ============================================
+-- ABYSALL VISUALS | PART 7/8
+-- Visuals → ESP Settings
+-- ============================================
+
+local ESPSettings = getgenv().AV_ESPSettings
+if not ESPSettings then
+    warn("[Abysall Visuals] ESP Settings tab не создан (Part 6)")
+    return
+end
+
+local T = getgenv().AV_Toggles
+local S = getgenv().AV_Sliders
+local D = getgenv().AV_Dropdowns
+
+-- ============================================
+-- SETTINGS: Basic
+-- ============================================
+ESPSettings:AddToggle("ESPRainbow", {
+    Text = "Rainbow Effect",
+    Default = false,
+    Tooltip = "Makes the ESP objects change colour like a rainbow.",
+    Callback = function(v) T.ESPRainbow = v end,
+})
+ESPSettings:AddToggle("ESPShowDistance", {
+    Text = "Show Distance",
+    Default = true,
+    Tooltip = "Shows how far away your character is from the object.",
+    Callback = function(v) T.ESPShowDistance = v end,
+})
+ESPSettings:AddDivider()
+
+-- ============================================
+-- SETTINGS: Transparency
+-- ============================================
+ESPSettings:AddSlider("ESPFillTransparency", {
+    Text = "Fill Transparency",
+    Min = 0, Max = 1, Default = 0.75, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPFillTransparency = v end,
+})
+ESPSettings:AddSlider("ESPOutlineTransparency", {
+    Text = "Outline Transparency",
+    Min = 0, Max = 1, Default = 0, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPOutlineTransparency = v end,
+})
+ESPSettings:AddSlider("ESPTextTransparency", {
+    Text = "Text Transparency",
+    Min = 0, Max = 1, Default = 0, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPTextTransparency = v end,
+})
+ESPSettings:AddSlider("ESPTextOutlineTransparency", {
+    Text = "Text Outline Transparency",
+    Min = 0, Max = 1, Default = 0, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPTextOutlineTransparency = v end,
+})
+ESPSettings:AddSlider("ESPFadeTime", {
+    Text = "Fade Time",
+    Min = 0, Max = 1, Default = 0.25, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPFadeTime = v end,
+})
+ESPSettings:AddSlider("ESPRenderLimit", {
+    Text = "Render Limit",
+    Min = 30, Max = 240, Default = 240, Rounding = 0, Compact = true,
+    Callback = function(v) S.ESPRenderLimit = v end,
+})
+ESPSettings:AddSlider("ESPTextSize", {
+    Text = "Text Size",
+    Min = 12, Max = 24, Default = 20, Rounding = 0, Compact = true,
+    Callback = function(v) S.ESPTextSize = v end,
+})
+
+-- ============================================
+-- SETTINGS: Font
+-- ============================================
+ESPSettings:AddDropdown("ESPTextFont", {
+    Text = "Text Font",
+    Values = {
+        "Legacy","Arial","ArialBold","SourceSans","SourceSansBold","SourceSansLight",
+        "SourceSansItalic","Bodoni","Garamond","Cartoon","Code","Highway","SciFi",
+        "Arcade","Fantasy","Antique","Gotham","GothamBold","GothamBlack",
+        "AmaticSC","Bangers","Creepster","DenkOne","IndieFlower","JosefinSans",
+        "Jura","Kalam","LuckiestGuy","Merriweather","Michroma","Nunito","Oswald",
+        "PatrickHand","PermanentMarker","Roboto","RobotoCondensed","RobotoMono",
+        "Sarpanch","SpecialElite","TitilliumWeb","Ubuntu",
+    },
+    Default = 12,
+    Callback = function(v) D.ESPTextFont = v end,
+})
+ESPSettings:AddDivider()
+
+-- ============================================
+-- SETTINGS: Tracers
+-- ============================================
+ESPSettings:AddDropdown("ESPTracersOrigin", {
+    Text = "Tracer Origin",
+    Values = { "Bottom", "Center", "Top", "Mouse" },
+    Default = 1,
+    Callback = function(v) D.ESPTracersOrigin = v end,
+})
+ESPSettings:AddSlider("ESPTracerThickness", {
+    Text = "Tracer Thickness",
+    Min = 0.5, Max = 2, Default = 0.75, Rounding = 2, Compact = true,
+    Callback = function(v) S.ESPTracerThickness = v end,
+})
+ESPSettings:AddToggle("ESPTracersToggle", {
+    Text = "Enable Tracers",
+    Default = false,
+    Tooltip = "Draws a line to highlighted objects.",
+    Callback = function(v) T.ESPTracersToggle = v end,
+})
+ESPSettings:AddDivider()
+
+-- ============================================
+-- SETTINGS: Arrows
+-- ============================================
+ESPSettings:AddSlider("ESPArrowsRadius", {
+    Text = "Arrow Radius",
+    Min = 100, Max = 500, Default = 250, Rounding = 0, Compact = true,
+    Callback = function(v) S.ESPArrowsRadius = v end,
+})
+ESPSettings:AddToggle("ESPArrowsToggle", {
+    Text = "Enable Arrows",
+    Default = false,
+    Tooltip = "Shows arrows that point to off-screen objects.",
+    Callback = function(v) T.ESPArrowsToggle = v end,
+})
+
+-- ============================================
+-- ДЕФОЛТНЫЕ ЗНАЧЕНИЯ
+-- ============================================
+T.ESPRainbow = false
+T.ESPShowDistance = true
+T.ESPTracersToggle = false
+T.ESPArrowsToggle = false
+
+S.ESPFillTransparency = 0.75
+S.ESPOutlineTransparency = 0
+S.ESPTextTransparency = 0
+S.ESPTextOutlineTransparency = 0
+S.ESPFadeTime = 0.25
+S.ESPRenderLimit = 240
+S.ESPTextSize = 20
+S.ESPTracerThickness = 0.75
+S.ESPArrowsRadius = 250
+
+D.ESPTextFont = "Highway"
+D.ESPTracersOrigin = "Bottom"
+
+print("[Abysall Visuals] Part 7/8 — ESP Settings filled")
+-- ============================================
+-- ABYSALL VISUALS | PART 8/8
+-- Main RenderStepped + финализация
+-- ============================================
+
+local T = getgenv().AV_Toggles
+local S = getgenv().AV_Sliders
+local D = getgenv().AV_Dropdowns
+local C = getgenv().AV_Colors
+local Globals = getgenv().AV_Globals
+local Objects = getgenv().AV_Objects
+local Connections = getgenv().AV_Connections
+local keep = getgenv().AV_keep
+
+local Players = game:GetService("Players")
+local RS = game:GetService("RunService")
+local TS = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local LP = Players.LocalPlayer
+
+-- ============================================
+-- ССЫЛКИ НА ПЕРСОНАЖА
+-- ============================================
+local Character, Humanoid, RootPart, Camera
+local Collision, CollisionPart, CollisionClone, CollisionPartClone
+local MainUI, Main_Game
+
+local function UpdateCharacter(newChar)
+    if not newChar then return end
+    Character = newChar
+    Humanoid = newChar:WaitForChild("Humanoid", 10)
+    RootPart = newChar:FindFirstChild("HumanoidRootPart")
+    Collision = newChar:WaitForChild("Collision", 10)
+    CollisionPart = newChar:FindFirstChild("CollisionPart") or Collision
+
+    if Collision and not newChar:FindFirstChild("CollisionClone") then
+        CollisionClone = Collision:Clone()
+        CollisionClone.Name = "CollisionClone"
+        CollisionClone.Massless = true
+        CollisionClone.Parent = newChar
+    else
+        CollisionClone = newChar:FindFirstChild("CollisionClone")
+    end
+
+    if CollisionPart and not newChar:FindFirstChild("CollisionPartClone") then
+        CollisionPartClone = CollisionPart:Clone()
+        CollisionPartClone.Name = "CollisionPartClone"
+        CollisionPartClone.CanCollide = false
+        CollisionPartClone.Massless = true
+        if CollisionPartClone:FindFirstChild("CollisionCrouch") then
+            CollisionPartClone.CollisionCrouch:Destroy()
+        end
+        CollisionPartClone.Parent = newChar
+    else
+        CollisionPartClone = newChar:FindFirstChild("CollisionPartClone")
+    end
+
+    Globals.OriginalC1 = nil
+    pcall(function()
+        if newChar:FindFirstChild("LowerTorso") and newChar.LowerTorso:FindFirstChild("Root") then
+            Globals.OriginalC1 = newChar.LowerTorso.Root.C1
+        end
+    end)
+
+    Globals.ThirdPersonParts = {}
+    for _, obj in ipairs(newChar:GetDescendants()) do
+        if obj:IsA("Accessory") and obj:FindFirstChild("Handle") then
+            table.insert(Globals.ThirdPersonParts, obj.Handle)
+        end
+    end
+    if newChar:FindFirstChild("Head") then
+        table.insert(Globals.ThirdPersonParts, newChar.Head)
+    end
+end
+
+if LP.Character then
+    task.spawn(function() UpdateCharacter(LP.Character) end)
+end
+keep(LP.CharacterAdded:Connect(function(c)
+    task.wait(0.5)
+    UpdateCharacter(c)
+end))
+
+-- ============================================
+-- ОЖИДАНИЕ MainUI
+-- ============================================
+task.spawn(function()
+    while not LP.PlayerGui:FindFirstChild("MainUI") do task.wait() end
+    MainUI = LP.PlayerGui.MainUI
+    if MainUI:FindFirstChild("Initiator") then
+        pcall(function()
+            Main_Game = MainUI.Initiator.Main_Game
+        end)
+    end
+end)
+
+-- ============================================
+-- ГЛАВНЫЙ RENDERSTEPPED ЦИКЛ
+-- ============================================
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local MainHandler = RS.RenderStepped:Connect(function()
+    -- Обновление камеры
+    local c = workspace:FindFirstChild("Camera")
+    if c then Camera = c end
+    if not Camera then Camera = workspace.CurrentCamera end
+    if not Camera then return end
+
+    -- Обновление ссылок на персонажа при смене
+    if LP.Character and Character ~= LP.Character then
+        UpdateCharacter(LP.Character)
+    end
+
+    -- ============================================
+    -- CAMERA: Ambient
+    -- ============================================
+    if T.AmbientToggle and C.AmbientColor then
+        TS:Create(Lighting, TweenInfo.new(0.2, Enum.EasingStyle.Exponential), {
+            Ambient = C.AmbientColor,
+        }):Play()
+    end
+
+    -- ============================================
+    -- CAMERA: FOV
+    -- ============================================
+    if T.FOVToggle and S.FieldOfView then
+        if Main_Game then
+            Main_Game.fovtarget = S.FieldOfView
+        else
+            Camera.FieldOfView = S.FieldOfView
+        end
+    end
+
+    -- ============================================
+    -- CAMERA: Remove Shake / Bobbing / Viewmodel
+    -- ============================================
+    if Main_Game then
+        if T.RemoveCameraShake then Main_Game.csgo = CFrame.new() end
+        if T.RemoveCameraBobbing then Main_Game.spring.Speed = 9e9 end
+
+        if T.ViewmodelOffsetToggle then
+            Main_Game.tooloffset = Vector3.new(
+                S.ViewmodelOffsetX or 0,
+                S.ViewmodelOffsetY or 0,
+                S.ViewmodelOffsetZ or 0
+            )
+        else
+            Main_Game.tooloffset = Vector3.zero
+        end
+    end
+
+    -- ============================================
+    -- CAMERA: Remove Fog
+    -- ============================================
+    if T.RemoveCameraFog then
+        Lighting.FogEnd = 10000000
+        for _, obj in ipairs(Globals.FogInstances) do
+            if obj.Parent then obj.Density = 0 end
+        end
+    end
+
+    -- ============================================
+    -- CAMERA: Third Person
+    -- ============================================
+    if T.ThirdPersonToggle and Character and Camera then
+        local TPOffset = CFrame.new(
+            S.ThirdPersonOffsetX or 1.5,
+            S.ThirdPersonOffsetY or 1,
+            S.ThirdPersonOffsetZ or 5
+        )
+        RayParams.FilterDescendantsInstances = { Character }
+        local Direction = (Camera.CFrame * TPOffset).Position - Camera.CFrame.Position
+        local WallResult = workspace:Spherecast(Camera.CFrame.Position, 0.2, Direction, RayParams)
+
+        if T.ThirdPersonWallCheck and WallResult and WallResult.Instance.CanCollide then
+            local NewPos = Camera.CFrame.Position + Direction.Unit * WallResult.Distance
+            Camera.CFrame = CFrame.new(NewPos, NewPos + Camera.CFrame.LookVector)
+        else
+            Camera.CFrame = Camera.CFrame * TPOffset
+        end
+
+        for _, part in ipairs(Globals.ThirdPersonParts) do
+            if part and part.Parent then
+                part.Transparency = 0
+                part.LocalTransparencyModifier = 0
+            end
+        end
+    else
+        for _, part in ipairs(Globals.ThirdPersonParts or {}) do
+            if part and part.Parent then
+                part.LocalTransparencyModifier = 1
+            end
+        end
+    end
+
+    -- ============================================
+    -- EFFECTS: Vignette / Jumpscares
+    -- ============================================
+    if MainUI then
+        local Vignette = MainUI:FindFirstChild("HideVignette")
+            or (MainUI:FindFirstChild("MainFrame") and MainUI.MainFrame:FindFirstChild("HideVignette"))
+        if Vignette then
+            if T.DisableHideVignette then
+                Vignette.Image = "Disabled"
+            else
+                Vignette.Image = "rbxassetid://6100076320"
+            end
+        end
+    end
+
+    -- ============================================
+    -- ГЛАВНЫЕ ФЛАГИ
+    -- ============================================
+    Globals.IsEyes = workspace:FindFirstChild("Eyes") ~= nil
+        or workspace:FindFirstChild("Lookman") ~= nil
+    Globals.IsLookman = workspace:FindFirstChild("BackdoorLookman") ~= nil
+end)
+
+keep(MainHandler)
+getgenv().AV_MainHandler = MainHandler
+
+-- ============================================
+-- FOG HANDLERS
+-- ============================================
+keep(Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
+    if Lighting.FogEnd ~= 10000000 then
+        Globals.OldFog = Lighting.FogEnd
+    end
+    if T.RemoveCameraFog then
+        Lighting.FogEnd = 10000000
+    end
+end))
+
+keep(Lighting.DescendantAdded:Connect(function(obj)
+    if not obj:IsA("Atmosphere") then return end
+    obj:SetAttribute("Density_Old", obj.Density)
+    if T.RemoveCameraFog then obj.Density = 0 end
+    local conn = obj:GetPropertyChangedSignal("Density"):Connect(function()
+        if obj.Density ~= 0 then obj:SetAttribute("Density_Old", obj.Density) end
+        if T.RemoveCameraFog then obj.Density = 0 end
+    end)
+    obj.Destroying:Once(function() conn:Disconnect() end)
+    table.insert(Globals.FogInstances, obj)
+end))
+
+for _, obj in ipairs(Lighting:GetChildren()) do
+    if obj:IsA("Atmosphere") then
+        obj:SetAttribute("Density_Old", obj.Density)
+        local conn = obj:GetPropertyChangedSignal("Density"):Connect(function()
+            if obj.Density ~= 0 then obj:SetAttribute("Density_Old", obj.Density) end
+            if T.RemoveCameraFog then obj.Density = 0 end
+        end)
+        obj.Destroying:Once(function() conn:Disconnect() end)
+        table.insert(Globals.FogInstances, obj)
+    end
+end
+
+-- ============================================
+-- HIDING SPOTS HANDLER
+-- ============================================
+local HidingSpotLabels = {
+    Wardrobe = "Closet",
+    ["Backdoor_Wardrobe"] = "Closet",
+    Toolshed = "Closet",
+    RetroWardrobe = "Closet",
+    ["Wardrobe-FOOLS26"] = "Closet",
+    Locker_Large = "Locker",
+    Rooms_Locker = "Hiding_Spot",
+    Rooms_Locker_Fridge = "Locker",
+    Bed = "Bed",
+    Double_Bed = "Double Bed",
+    CircularVent = "Vent",
+    Dumpster = "Dumpster",
+}
+
+keep(workspace.DescendantAdded:Connect(function(obj)
+    if not obj:IsA("Model") then return end
+
+    local name = obj.Name
+    if HidingSpotLabels[name] or string.find(string.lower(name), "hidingspot") then
+        table.insert(Objects.HidingSpots, obj)
+
+        local Parts = {}
+        for _, part in ipairs(obj:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part:SetAttribute("Transparency_Old", part.Transparency)
+                table.insert(Parts, part)
+            end
+        end
+        for _, part in ipairs(obj:GetDescendants()) do
+            if part.Name == "HiddenPlayer" then
+                local hideConn = part:GetPropertyChangedSignal("Value"):Connect(function()
+                    if not T.TransparentHidingSpotsToggle then return end
+                    for _, p in ipairs(Parts) do
+                        local oldT = p:GetAttribute("Transparency_Old")
+                        if oldT then
+                            TS:Create(p, TweenInfo.new(0.25, Enum.EasingStyle.Linear), {
+                                Transparency = (part.Value == Character and T.TransparentHidingSpotsToggle)
+                                    and (S.TransparentHidingSpotsSlider or 0.5)
+                                    or oldT
+                            }):Play()
+                        end
+                    end
+                end)
+                obj.Destroying:Once(function() hideConn:Disconnect() end)
+                keep(hideConn)
+            end
+        end
+    end
+end))
+
+-- ============================================
+-- ESP HANDLER (заготовка — требует Abysall.ESPLibrary)
+-- ============================================
+task.spawn(function()
+    task.wait(2)
+    local lib = getgenv().Abysall and getgenv().Abysall.ESPLibrary
+    if lib then
+        pcall(function()
+            lib:SetRainbow(T.ESPRainbow or false)
+            lib:SetShowDistance(T.ESPShowDistance ~= false)
+            lib:SetFillTransparency(S.ESPFillTransparency or 0.75)
+            lib:SetOutlineTransparency(S.ESPOutlineTransparency or 0)
+            lib:SetTextTransparency(S.ESPTextTransparency or 0)
+            lib:SetTextOutlineTransparency(S.ESPTextOutlineTransparency or 0)
+            lib:SetRenderLimit(S.ESPRenderLimit or 240)
+            lib:SetFadeTime(S.ESPFadeTime or 0.25)
+            lib:SetTextSize(S.ESPTextSize or 20)
+            lib:SetFont(Enum.Font.Highway)
+            lib:SetTracers(T.ESPTracersToggle or false)
+            lib:SetTracerSize(S.ESPTracerThickness or 0.75)
+            lib:SetTracerOrigin(D.ESPTracersOrigin or "Bottom")
+            lib:SetArrows(T.ESPArrowsToggle or false)
+            lib:SetArrowRadius(S.ESPArrowsRadius or 250)
+        end)
+    end
+end)
+
+-- ============================================
+-- ФИНАЛИЗАЦИЯ
+-- ============================================
+keep((function()
+    local conn = LP.CharacterRemoving:Connect(function()
+        if MainHandler then MainHandler:Disconnect() end
+    end)
+    return conn
+end)())
+
+print("[Abysall Visuals] Part 8/8 — Main loop active")
+
+-- ============================================
+-- UNLOAD ПРИ ПЕРЕЗАПУСКЕ
+-- ============================================
+getgenv().AV_Unload = function()
+    for _, conn in ipairs(Connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    table.clear(Connections)
+    if getgenv().AV_Window and getgenv().AV_Window.Destroy then
+        pcall(function() getgenv().AV_Window:Destroy() end)
+    end
+    print("[Abysall Visuals] Unloaded")
+end
+
+print("[Abysall Visuals] DONE — All 8 parts loaded. Visuals ready.")
